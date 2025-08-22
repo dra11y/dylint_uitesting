@@ -85,6 +85,25 @@ pub mod ui;
 static DRIVER: OnceLock<PathBuf> = OnceLock::new();
 static LINKING_FLAGS: OnceLock<Vec<String>> = OnceLock::new();
 
+macro_rules! declare_env_var {
+    ($var: ident) => {
+        pub const $var: &str = stringify!($var);
+    };
+}
+
+declare_env_var!(BLESS);
+declare_env_var!(RUST_BACKTRACE);
+declare_env_var!(RUST_LOG);
+
+pub fn is_env_truthy(var: &str) -> bool {
+    ["true", "1"].contains(
+        &std::env::var_os(var)
+            .map(|s| s.to_string_lossy().to_lowercase())
+            .unwrap_or_default()
+            .as_str(),
+    )
+}
+
 /// Test a library on all source files in a directory.
 ///
 /// - `name` is the name of a Dylint library to be tested. (Often, this is the same as the package
@@ -379,7 +398,7 @@ fn run_tests(driver: &Path, src_base: &Path, config: &ui::Config) {
     // Program: overwrite only the binary path to the dylint driver and extend args
     cfg.program.program = driver.to_path_buf();
     // Required flags for diagnostics
-    for arg in ["--emit=metadata", "-Dwarnings"] {
+    for arg in ["-Dwarnings", "--emit=metadata"] {
         cfg.program.args.push(OsString::from(arg));
     }
     // User-provided rustc flags (and example linking flags already merged upstream)
@@ -392,6 +411,9 @@ fn run_tests(driver: &Path, src_base: &Path, config: &ui::Config) {
         env::DYLINT_LIBS,
         env::CLIPPY_DISABLE_DOCS_LINKS,
         env::DYLINT_TOML,
+        // Forward debugging aids so compiler ICEs/errors are actionable under the harness
+        RUST_BACKTRACE,
+        RUST_LOG,
     ] {
         let val = std::env::var_os(key);
         cfg.program
@@ -399,22 +421,21 @@ fn run_tests(driver: &Path, src_base: &Path, config: &ui::Config) {
             .push((OsString::from(key), val.map(Into::into)));
     }
 
-    // Always verify first without writing expected files; do not fail on missing/changed expected outputs
-    cfg.output_conflict_handling = ui_test::ignore_output_conflict;
-    cfg.bless_command = Some("BLESS=1 cargo test".into());
+    let bless = is_env_truthy(BLESS);
+    cfg.output_conflict_handling = if bless {
+        ui_test::bless_output_files
+    } else {
+        cfg.bless_command = Some(format!("{BLESS}=1 cargo test"));
+        ui_test::error_on_output_conflict
+    };
 
-    if let Err(report) = ui_test::run_tests(cfg.clone()) {
-        // ui_test prints rich diagnostics; still fail this test
-        panic!("{}", report);
-    }
-
-    // If BLESS=1 and verification succeeded, run a second pass to write expected files
-    if std::env::var_os("BLESS").is_some() {
-        let mut bless_cfg = cfg;
-        bless_cfg.output_conflict_handling = ui_test::bless_output_files;
-        if let Err(report) = ui_test::run_tests(bless_cfg) {
-            // This is unlikely after a successful verify pass, but handle defensively
-            panic!("{}", report);
+    match ui_test::run_tests(cfg) {
+        Ok(()) => {}
+        Err(report) => {
+            let msg = report.to_string();
+            // if !msg.contains("tests failed") {
+            panic!("TEST PANIC: {msg}");
+            // }
         }
     }
 }
