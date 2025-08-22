@@ -1,7 +1,12 @@
-use crate::{example_target, example_targets, initialize, run_example_test, run_tests};
 use std::{
     env::current_dir,
     path::{Path, PathBuf},
+};
+
+use crate::{
+    cargo_integration::{example_target, example_targets},
+    runtime::initialize,
+    test_runner::run_example_test,
 };
 enum Target {
     SrcBase(PathBuf),
@@ -83,7 +88,7 @@ impl Test {
 
         match &self.target {
             Target::SrcBase(src_base) => {
-                run_tests(driver, src_base, &self.config);
+                crate::test_runner::run_tests(driver, src_base, &self.config);
             }
             Target::Example(example) => {
                 let metadata = dylint_internal::cargo::current_metadata().unwrap();
@@ -92,7 +97,14 @@ impl Test {
                     dylint_internal::cargo::package_with_root(&metadata, &current_dir).unwrap();
                 let target = example_target(&package, example).unwrap();
 
-                run_example_test(driver, &metadata, &package, &target, &self.config).unwrap();
+                crate::test_runner::run_example_test(
+                    driver,
+                    &metadata,
+                    &package,
+                    &target,
+                    &self.config,
+                )
+                .unwrap();
             }
             Target::Examples => {
                 let metadata = dylint_internal::cargo::current_metadata().unwrap();
