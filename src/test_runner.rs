@@ -9,7 +9,7 @@ use std::{ffi::OsString, fs::copy, path::Path, sync::Mutex};
 
 static MUTEX: Mutex<()> = Mutex::new(());
 
-pub fn run_tests(driver: &Path, src_base: &Path, config: &ui::Config) {
+pub(crate) fn run_tests(driver: &Path, src_base: &Path, config: &ui::Config) -> Result<()> {
     let _lock = MUTEX.lock().unwrap();
 
     // Temporarily set DYLINT_TOML if provided
@@ -55,15 +55,7 @@ pub fn run_tests(driver: &Path, src_base: &Path, config: &ui::Config) {
         ui_test::error_on_output_conflict
     };
 
-    match ui_test::run_tests(cfg) {
-        Ok(()) => {}
-        Err(report) => {
-            let msg = report.to_string();
-            // if !msg.contains("tests failed") {
-            panic!("TEST PANIC: {msg}");
-            // }
-        }
-    }
+    ui_test::run_tests(cfg).map_err(|err| anyhow!("run tests failed: {err}"))
 }
 
 pub fn run_example_test(
@@ -99,9 +91,7 @@ pub fn run_example_test(
     let mut config = config.clone();
     config.rustc_flags.extend(linking_flags.iter().cloned());
 
-    run_tests(driver, src_base, &config);
-
-    Ok(())
+    run_tests(driver, src_base, &config)
 }
 
 fn copy_with_extension<P: AsRef<Path>, Q: AsRef<Path>>(
@@ -112,4 +102,42 @@ fn copy_with_extension<P: AsRef<Path>, Q: AsRef<Path>>(
     let from = from.as_ref().with_extension(extension);
     let to = to.as_ref().with_extension(extension);
     copy(from, to).map_err(Into::into)
+}
+
+#[cfg(test)]
+mod gating_tests {
+    use super::*;
+    use std::{env::set_var, path::PathBuf};
+
+    fn write_file(dir: &Path, name: &str, contents: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    #[test]
+    fn no_annotations_does_not_bless_even_with_env() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = write_file(
+            tmp.path(),
+            "no_annot.rs",
+            "//@edition: 2021\nfn main(){ let _ = undefined; }\n",
+        );
+
+        // Build minimal config
+        let config = ui::Config::default();
+
+        // Set BLESS=1 to simulate user blessing
+        unsafe { set_var("BLESS", "1") }
+
+        // Expect run_tests to fail due to missing //~ annotations
+        let result = run_tests(Path::new("rustc"), tmp.path(), &config);
+        assert!(result.is_err(), "verify should fail without annotations");
+
+        // Ensure .stderr was NOT created despite BLESS being set
+        assert!(
+            !file.with_extension("stderr").exists(),
+            ".stderr must not be created when annotations are missing"
+        );
+    }
 }

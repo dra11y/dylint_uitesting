@@ -88,7 +88,8 @@ impl Test {
 
         match &self.target {
             Target::SrcBase(src_base) => {
-                crate::test_runner::run_tests(driver, src_base, &self.config);
+                crate::test_runner::run_tests(driver, src_base, &self.config)
+                    .expect("run tests failed");
             }
             Target::Example(example) => {
                 let metadata = dylint_internal::cargo::current_metadata().unwrap();
