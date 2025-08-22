@@ -3,7 +3,6 @@ use std::{
     env::current_dir,
     path::{Path, PathBuf},
 };
-
 enum Target {
     SrcBase(PathBuf),
     Example(String),

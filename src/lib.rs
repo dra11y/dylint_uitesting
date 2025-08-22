@@ -109,12 +109,11 @@
 //! [examples]: https://github.com/trailofbits/dylint/tree/master/examples
 //! [its repository]: https://github.com/Manishearth/compiletest-rs
 
-use anyhow::{anyhow, ensure, Context, Result};
+use anyhow::{Context, Result, anyhow, ensure};
 use cargo_metadata::{Metadata, Package, Target, TargetKind};
-use compiletest_rs as compiletest;
-use dylint_internal::{env, library_filename, rustup::is_rustc, CommandExt};
-use once_cell::sync::OnceCell;
+use dylint_internal::{CommandExt, env, library_filename, rustup::is_rustc};
 use regex::Regex;
+use std::sync::OnceLock;
 use std::{
     env::{consts, remove_var, set_var, var_os},
     ffi::{OsStr, OsString},
@@ -123,11 +122,12 @@ use std::{
     path::{Path, PathBuf},
     sync::{LazyLock, Mutex},
 };
+use ui_test::{self};
 
 pub mod ui;
 
-static DRIVER: OnceCell<PathBuf> = OnceCell::new();
-static LINKING_FLAGS: OnceCell<Vec<String>> = OnceCell::new();
+static DRIVER: OnceLock<PathBuf> = OnceLock::new();
+static LINKING_FLAGS: OnceLock<Vec<String>> = OnceLock::new();
 
 /// Test a library on all source files in a directory.
 ///
@@ -156,41 +156,36 @@ pub fn ui_test_examples(name: &str) {
 }
 
 fn initialize(name: &str) -> Result<&Path> {
-    DRIVER
-        .get_or_try_init(|| {
-            let _ = env_logger::try_init();
+    if let Some(path) = DRIVER.get() {
+        return Ok(path.as_path());
+    }
 
-            // smoelius: Try to order failures by how informative they are: failure to build the
-            // library, failure to find the library, failure to build/find the driver.
+    let _ = env_logger::try_init();
 
-            dylint_internal::cargo::build(&format!("library `{name}`"))
-                .build()
-                .success()?;
+    // Try to order failures by informativeness: build lib, then find lib, then build/find driver.
+    dylint_internal::cargo::build(&format!("library `{name}`"))
+        .build()
+        .success()?;
 
-            // smoelius: `DYLINT_LIBRARY_PATH` must be set before `dylint_libs` is called.
-            // smoelius: This was true when `dylint_libs` called `name_toolchain_map`, but that is
-            // no longer the case. I am leaving the comment here for now in case removal
-            // of the `name_toolchain_map` call causes a regression.
-            let metadata = dylint_internal::cargo::current_metadata().unwrap();
-            let dylint_library_path = metadata.target_directory.join("debug");
-            unsafe {
-                set_var(env::DYLINT_LIBRARY_PATH, dylint_library_path);
-            }
+    // `DYLINT_LIBRARY_PATH` must be set before `dylint_libs` is called.
+    let metadata = dylint_internal::cargo::current_metadata().unwrap();
+    let dylint_library_path = metadata.target_directory.join("debug");
+    unsafe {
+        set_var(env::DYLINT_LIBRARY_PATH, dylint_library_path);
+    }
 
-            let dylint_libs = dylint_libs(name)?;
-            let driver = dylint::driver_builder::get(
-                &dylint::opts::Dylint::default(),
-                env!("RUSTUP_TOOLCHAIN"),
-            )?;
+    let dylint_libs = dylint_libs(name)?;
+    let driver =
+        dylint::driver_builder::get(&dylint::opts::Dylint::default(), env!("RUSTUP_TOOLCHAIN"))?;
 
-            unsafe {
-                set_var(env::CLIPPY_DISABLE_DOCS_LINKS, "true");
-                set_var(env::DYLINT_LIBS, dylint_libs);
-            }
+    unsafe {
+        set_var(env::CLIPPY_DISABLE_DOCS_LINKS, "true");
+        set_var(env::DYLINT_LIBS, dylint_libs);
+    }
 
-            Ok(driver)
-        })
-        .map(PathBuf::as_path)
+    // Store driver path for future calls
+    let _ = DRIVER.set(driver);
+    Ok(DRIVER.get().unwrap().as_path())
 }
 
 #[doc(hidden)]
@@ -265,25 +260,25 @@ fn linking_flags(
     package: &Package,
     target: &Target,
 ) -> Result<&'static [String]> {
-    LINKING_FLAGS
-        .get_or_try_init(|| {
-            let rustc_flags = rustc_flags(metadata, package, target)?;
+    if let Some(existing) = LINKING_FLAGS.get() {
+        return Ok(existing.as_slice());
+    }
 
-            let mut linking_flags = Vec::new();
+    let rustc_flags = rustc_flags(metadata, package, target)?;
 
-            let mut iter = rustc_flags.into_iter();
-            while let Some(flag) = iter.next() {
-                if flag.starts_with("--edition=") {
-                    linking_flags.push(flag);
-                } else if flag == "--extern" || flag == "-L" {
-                    let arg = next(&flag, &mut iter)?;
-                    linking_flags.extend([flag, arg.trim_matches('\'').to_owned()]);
-                }
-            }
+    let mut linking_flags = Vec::new();
+    let mut iter = rustc_flags.into_iter();
+    while let Some(flag) = iter.next() {
+        if flag.starts_with("--edition=") {
+            linking_flags.push(flag);
+        } else if flag == "--extern" || flag == "-L" {
+            let arg = next(&flag, &mut iter)?;
+            linking_flags.extend([flag, arg.trim_matches('\'').to_owned()]);
+        }
+    }
 
-            Ok(linking_flags)
-        })
-        .map(Vec::as_slice)
+    let _ = LINKING_FLAGS.set(linking_flags);
+    Ok(LINKING_FLAGS.get().unwrap().as_slice())
 }
 
 // smoelius: We need to recover the `rustc` flags used to build a target. I can see four options:
@@ -416,33 +411,56 @@ static MUTEX: Mutex<()> = Mutex::new(());
 fn run_tests(driver: &Path, src_base: &Path, config: &ui::Config) {
     let _lock = MUTEX.lock().unwrap();
 
-    // smoelius: There doesn't seem to be a way to set environment variables using `compiletest`'s
-    // [`Config`](https://docs.rs/compiletest_rs/0.7.1/compiletest_rs/common/struct.Config.html)
-    // struct. For comparison, where Clippy uses `compiletest`, it sets environment variables
-    // directly (see: https://github.com/rust-lang/rust-clippy/blob/master/tests/compile-test.rs).
-    //
-    // Of course, even if `compiletest` had such support, it would need to be incorporated into
-    // `dylint_testing`.
-
+    // Temporarily set DYLINT_TOML if provided
     let _var = config
         .dylint_toml
         .as_ref()
         .map(|value| VarGuard::set(env::DYLINT_TOML, value));
 
-    let config = compiletest::Config {
-        mode: compiletest::common::Mode::Ui,
-        rustc_path: driver.to_path_buf(),
-        src_base: src_base.to_path_buf(),
-        target_rustcflags: Some(
-            config.rustc_flags.clone().join(" ")
-                + " --emit=metadata"
-                + " --Dwarnings"
-                + " -Zui-testing",
-        ),
-        ..compiletest::Config::default()
-    };
+    // Build ui_test config starting from rustc defaults
+    let mut cfg = ui_test::Config::rustc(src_base);
 
-    compiletest::run_tests(&config);
+    // Program: overwrite only the binary path to the dylint driver and extend args
+    cfg.program.program = driver.to_path_buf();
+    // Required flags for annotation parsing and diagnostics
+    for arg in ["--error-format=json", "--emit=metadata", "-Dwarnings"] {
+        cfg.program.args.push(OsString::from(arg));
+    }
+    // User-provided rustc flags (and example linking flags already merged upstream)
+    for arg in &config.rustc_flags {
+        cfg.program.args.push(OsString::from(arg));
+    }
+
+    // Propagate relevant env vars to the driver
+    for key in [
+        env::DYLINT_LIBS,
+        env::CLIPPY_DISABLE_DOCS_LINKS,
+        env::DYLINT_TOML,
+    ] {
+        let val = std::env::var_os(key);
+        cfg.program
+            .envs
+            .push((OsString::from(key), val.map(Into::into)));
+    }
+
+    // Always verify first without writing expected files
+    cfg.output_conflict_handling = ui_test::error_on_output_conflict;
+    cfg.bless_command = Some("BLESS=1 cargo test".into());
+
+    if let Err(report) = ui_test::run_tests(cfg.clone()) {
+        // ui_test prints rich diagnostics; still fail this test
+        panic!("{}", report);
+    }
+
+    // If BLESS=1 and verification succeeded, run a second pass to write expected files
+    if std::env::var_os("BLESS").is_some() {
+        let mut bless_cfg = cfg;
+        bless_cfg.output_conflict_handling = ui_test::bless_output_files;
+        if let Err(report) = ui_test::run_tests(bless_cfg) {
+            // This is unlikely after a successful verify pass, but handle defensively
+            panic!("{}", report);
+        }
+    }
 }
 
 // smoelius: `VarGuard` was copied from:
