@@ -422,8 +422,8 @@ fn run_tests(driver: &Path, src_base: &Path, config: &ui::Config) {
 
     // Program: overwrite only the binary path to the dylint driver and extend args
     cfg.program.program = driver.to_path_buf();
-    // Required flags for annotation parsing and diagnostics
-    for arg in ["--error-format=json", "--emit=metadata", "-Dwarnings"] {
+    // Required flags for diagnostics
+    for arg in ["--emit=metadata", "-Dwarnings"] {
         cfg.program.args.push(OsString::from(arg));
     }
     // User-provided rustc flags (and example linking flags already merged upstream)

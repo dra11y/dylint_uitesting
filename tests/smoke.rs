@@ -106,3 +106,25 @@ fn missing_annotation_does_not_write_stderr_even_on_bless() {
         ".stderr must not be created when annotations are missing"
     );
 }
+
+#[test]
+fn async_annotations_supported() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let file = tmp.path().join("async.rs");
+    fs::write(
+        &file,
+        "//@edition: 2024\nasync fn f(){\n    let _ = undefined; //~ ERROR: cannot find value `undefined` in this scope\n}\nfn main(){}\n",
+    )
+    .expect("write async file");
+
+    let mut cfg = ui_test::Config::rustc(file.parent().unwrap());
+    cfg.output_conflict_handling = ui_test::ignore_output_conflict;
+    cfg.bless_command = Some("BLESS=1 cargo test".into());
+    ui_test::run_tests(cfg.clone()).expect("verify pass should succeed for async");
+
+    // Bless
+    let mut bless_cfg = cfg;
+    bless_cfg.output_conflict_handling = ui_test::bless_output_files;
+    ui_test::run_tests(bless_cfg).expect("bless pass should succeed for async");
+    assert!(file.with_extension("stderr").exists());
+}

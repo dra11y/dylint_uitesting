@@ -20,7 +20,3 @@ ui_test = "0.30.2"
 
 [features]
 default = []
-
-[[example]]
-name = "uit_smoke"
-path = "examples/uit_smoke.rs"
