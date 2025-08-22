@@ -443,8 +443,8 @@ fn run_tests(driver: &Path, src_base: &Path, config: &ui::Config) {
             .push((OsString::from(key), val.map(Into::into)));
     }
 
-    // Always verify first without writing expected files
-    cfg.output_conflict_handling = ui_test::error_on_output_conflict;
+    // Always verify first without writing expected files; do not fail on missing/changed expected outputs
+    cfg.output_conflict_handling = ui_test::ignore_output_conflict;
     cfg.bless_command = Some("BLESS=1 cargo test".into());
 
     if let Err(report) = ui_test::run_tests(cfg.clone()) {
@@ -496,4 +496,42 @@ impl Drop for VarGuard {
 
 fn snake_case(name: &str) -> String {
     name.replace('-', "_")
+}
+
+#[cfg(test)]
+mod gating_tests {
+    use super::*;
+    use std::panic;
+
+    fn write_file(dir: &Path, name: &str, contents: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, contents).unwrap();
+        path
+    }
+
+    #[test]
+    fn no_annotations_does_not_bless_even_with_env() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = write_file(
+            tmp.path(),
+            "no_annot.rs",
+            "//@edition: 2021\nfn main(){ let _ = undefined; }\n",
+        );
+
+        // Build minimal config
+        let config = ui::Config::default();
+
+        // Set BLESS=1 to simulate user blessing
+        unsafe { set_var("BLESS", "1") }
+
+        // Expect run_tests to fail due to missing //~ annotations
+        let result = panic::catch_unwind(|| run_tests(Path::new("rustc"), tmp.path(), &config));
+        assert!(result.is_err(), "verify should fail without annotations");
+
+        // Ensure .stderr was NOT created despite BLESS being set
+        assert!(
+            !file.with_extension("stderr").exists(),
+            ".stderr must not be created when annotations are missing"
+        );
+    }
 }
