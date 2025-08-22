@@ -1,0 +1,22 @@
+[package]
+name = "dylint_uitesting"
+version = "4.1.0"
+authors = ["Tom Grushka <tom@dra11y.com>", "Samuel E. Moelius III <sam@moeli.us>"]
+description = "Better UI testing for dylint libraries with ui_test"
+edition = "2024"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/dra11y/dylint_uitesting"
+
+[dependencies]
+anyhow = "1"
+cargo_metadata = "0.22"
+dylint = "4.1.0"
+dylint_internal = "4.1.0"
+env_logger = "0.11"
+regex = "1"
+serde_json = "1"
+tempfile = "3"
+ui_test = "0.30.2"
+
+[features]
+default = []
