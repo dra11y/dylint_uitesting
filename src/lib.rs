@@ -40,8 +40,7 @@
 //!
 //! - `dylint_toml` - set the `dylint.toml` file's contents (for testing [configurable libraries])
 //! - `rustc_flags` - pass flags to the compiler when running the test
-//! - `expected_exit_status` - set the exact expected exit status (default 101 for driver)
-//! - `expected_exit_either` - accept either of two exit codes (e.g., 101 or 1)
+//! - `expected_exit_status` - set the expected driver exit status (default 101 for dylint_driver)
 //! - `run` - run the test
 //!
 //! # Blessing expected files

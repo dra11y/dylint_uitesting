@@ -46,12 +46,18 @@ A `Test` instance has the following methods:
 
 - `dylint_toml` - set the `dylint.toml` file's contents (for testing [configurable libraries])
 - `rustc_flags` - pass flags to the compiler when running the test
+- `expected_exit_status` - set the expected driver exit status (default 101 for dylint_driver)
 - `run` - run the test
 
 ## Blessing expected files
 
-- Default run: `cargo test` uses annotations only. It will not create or overwrite `.stderr/.stdout` files.
-- Bless: `BLESS=1 cargo test` will first verify that annotations pass, then write or update `.stderr/.stdout` for you.
+- Default run: `cargo test` verifies annotations and diffs against `.stderr/.stdout`. It never writes fixtures.
+- Bless: `BLESS=1 cargo test` performs a two-pass run:
+  1) Verify (no writes). 2) If verification succeeds, update `.stderr/.stdout`.
+
+Exit status: when using the Dylint driver, we accept either exit code `101` (current behavior)
+or `1` (future-compatible), so your tests remain stable if upstream changes. Diagnostics are
+parsed from stderr; debug driver prefixes are filtered for stable diffs.
 
 This keeps diffs in `target/ui` during normal runs and only touches fixtures when you explicitly bless.
 
