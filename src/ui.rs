@@ -3,6 +3,8 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use log::debug;
+
 use crate::{
     cargo_integration::{example_target, example_targets},
     runtime::initialize,
@@ -14,10 +16,24 @@ enum Target {
     Examples,
 }
 
-#[derive(Clone, Default)]
+/// Expected exit status for dylint driver (101 instead of 1 for some reason, ask upstream);
+const DEFAULT_EXPECTED_EXIT_STATUS: i32 = 101;
+
+#[derive(Clone)]
 pub(super) struct Config {
     pub(super) rustc_flags: Vec<String>,
     pub(super) dylint_toml: Option<String>,
+    pub(super) expected_exit_status: i32,
+}
+
+impl Default for Config {
+    fn default() -> Self {
+        Self {
+            rustc_flags: Vec::new(),
+            dylint_toml: None,
+            expected_exit_status: DEFAULT_EXPECTED_EXIT_STATUS,
+        }
+    }
 }
 
 /// Test builder
@@ -69,6 +85,12 @@ impl Test {
         self
     }
 
+    /// Set the expected exit status for the dylint driver.
+    pub fn expected_exit_status(&mut self, code: i32) -> &mut Self {
+        self.config.expected_exit_status = code;
+        self
+    }
+
     /// Run the test.
     #[allow(clippy::needless_pass_by_ref_mut)]
     pub fn run(&mut self) {
@@ -84,14 +106,24 @@ impl Test {
     }
 
     fn run_immutable(&self) {
+        debug!(
+            "run_immutable: Starting run_immutable for library '{}'",
+            self.name
+        );
         let driver = initialize(&self.name).unwrap();
+        debug!("run_immutable: Got driver: {}", driver.display());
 
         match &self.target {
             Target::SrcBase(src_base) => {
+                debug!(
+                    "run_immutable: Running SrcBase target with src_base: {}",
+                    src_base.display()
+                );
                 crate::test_runner::run_tests(driver, src_base, &self.config)
                     .expect("run tests failed");
             }
             Target::Example(example) => {
+                debug!("run_immutable: Running Example target: {}", example);
                 let metadata = dylint_internal::cargo::current_metadata().unwrap();
                 let current_dir = current_dir().unwrap();
                 let package =
