@@ -7,8 +7,30 @@ use anyhow::{Context, Result, anyhow};
 use cargo_metadata::{Metadata, Package, Target};
 use log::debug;
 use std::{ffi::OsString, fs::copy, path::Path, sync::Mutex};
+use ui_test::diagnostics::Diagnostics;
 
 static MUTEX: Mutex<()> = Mutex::new(());
+
+// "unqualifies" diagnostic codes, e.g. clippy::uninlined_format_args -> uninlined_format_args
+fn normalize_codes(path: &Path, bytes: &[u8]) -> Diagnostics {
+    let mut out = ui_test::diagnostics::rustc::rustc_diagnostics_extractor(path, bytes);
+    for line in &mut out.messages {
+        for d in line {
+            if let Some(code) = &d.code
+                && code.contains("::")
+                && let Some(unprefixed) = code.split("::").last()
+            {
+                println!("normalize_codes: REMOVE PREFIX: {code} -> {unprefixed}");
+                d.code = Some(unprefixed.to_string());
+            } else if let Some(code) = &d.code {
+                println!("normalize_codes: NO PREFIX: {code}");
+            } else {
+                println!("normalize_codes: NO CODE");
+            }
+        }
+    }
+    out
+}
 
 pub(crate) fn run_tests(driver: &Path, src_base: &Path, config: &ui::Config) -> Result<()> {
     let _lock = MUTEX.lock().unwrap();
@@ -82,6 +104,10 @@ pub(crate) fn run_tests(driver: &Path, src_base: &Path, config: &ui::Config) -> 
     // Normalize noisy driver debug lines on stderr for stable diffs.
     // Example: "[2025-..Z DEBUG dylint_driver] [\"rustc\", ...]"
     cfg.stderr_filter(r"(?m)^\[[^\]]+\s+DEBUG\s+dylint_driver\].*\n", b"");
+
+    if config.normalize_codes {
+        cfg.diagnostic_extractor = normalize_codes;
+    }
 
     if bless {
         debug!("run_tests: Running two-pass blessing approach");
@@ -207,6 +233,7 @@ mod gating_tests {
         // Test the run_tests function directly with plain rustc - no dylint driver needed!
         debug!("🧪 About to call run_tests with rustc...");
         let rustc_path = std::path::Path::new("rustc");
+
         let result = run_tests(rustc_path, tmp.path(), &config);
         debug!("🧪 run_tests returned: {:?}", result);
 

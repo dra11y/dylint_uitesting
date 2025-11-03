@@ -64,7 +64,6 @@ pub fn initialize(name: &str) -> Result<&Path> {
     Ok(DRIVER.get().unwrap().as_path())
 }
 
-#[doc(hidden)]
 pub fn dylint_libs(name: &str) -> Result<String> {
     let metadata = dylint_internal::cargo::current_metadata().unwrap();
     let rustup_toolchain = env::var(env::RUSTUP_TOOLCHAIN)?;

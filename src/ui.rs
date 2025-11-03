@@ -24,6 +24,7 @@ pub(super) struct Config {
     pub(super) rustc_flags: Vec<String>,
     pub(super) dylint_toml: Option<String>,
     pub(super) expected_exit_status: i32,
+    pub(super) normalize_codes: bool,
 }
 
 impl Default for Config {
@@ -32,6 +33,7 @@ impl Default for Config {
             rustc_flags: Vec::new(),
             dylint_toml: None,
             expected_exit_status: DEFAULT_EXPECTED_EXIT_STATUS,
+            normalize_codes: false,
         }
     }
 }
@@ -88,6 +90,12 @@ impl Test {
     /// Set the expected exit status for the dylint driver.
     pub fn expected_exit_status(&mut self, code: i32) -> &mut Self {
         self.config.expected_exit_status = code;
+        self
+    }
+
+    /// Whether to strip prefixes from diagnostic codes, e.g. clippy::xxx -> xxx
+    pub fn normalize_codes(&mut self, normalize_codes: bool) -> &mut Self {
+        self.config.normalize_codes = normalize_codes;
         self
     }
 

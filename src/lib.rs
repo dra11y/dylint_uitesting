@@ -76,6 +76,7 @@ use std::path::Path;
 mod cargo_integration;
 mod env;
 mod runtime;
+pub use runtime::dylint_libs;
 mod test_runner;
 pub mod ui;
 
