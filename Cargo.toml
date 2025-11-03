@@ -1,6 +1,6 @@
 [package]
 name = "dylint_uitesting"
-version = "4.1.0"
+version = "5.0.0"
 authors = ["Tom Grushka <tom@dra11y.com>", "Samuel E. Moelius III <sam@moeli.us>"]
 description = "Better UI testing for dylint libraries with ui_test"
 edition = "2024"
@@ -9,9 +9,9 @@ repository = "https://github.com/dra11y/dylint_uitesting"
 
 [dependencies]
 anyhow = "1"
-cargo_metadata = "0.19.2" # pinned by dylint_internal
-dylint = "4.1.0"
-dylint_internal = "4.1.0"
+cargo_metadata = "0.23" # pinned by dylint_internal
+dylint = "5"
+dylint_internal = "5"
 env_logger = "0.11"
 log = "0.4.27"
 regex = "1"
